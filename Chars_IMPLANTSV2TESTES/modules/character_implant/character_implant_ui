@@ -1,0 +1,522 @@
+import os
+import sys
+import tkinter as tk
+from tkinter import filedialog, ttk, messagebox
+from PIL import Image, ImageTk
+
+# Import local modules
+try:
+    from .character_implant import CharacterImplantApp
+except ImportError:
+    # Fallback to direct imports for testing
+    from character_implant import CharacterImplantApp
+
+class EnhancedCharacterImplantUI(CharacterImplantApp):
+    """Enhanced UI for ARK character implant management."""
+    
+    def __init__(self, root=None, config=None):
+        """Initialize the enhanced UI.
+        
+        Args:
+            root (tk.Tk, optional): Tkinter root window
+            config (dict, optional): Configuration settings
+        """
+        # Default enhanced configuration
+        enhanced_config = {
+            'window_width': 1200,
+            'window_height': 850,
+            'display_frame_height': 550,
+            'theme': "dark",
+            'enable_statistics': True,
+            'auto_scan': True
+        }
+        
+        # Update with provided config
+        if config:
+            enhanced_config.update(config)
+            
+        # Initialize base class
+        super().__init__(root, enhanced_config)
+        
+        # Add enhanced UI elements
+        self.add_menu_bar()
+        self.add_status_bar()
+        
+        if self.config['enable_statistics']:
+            self.add_statistics_panel()
+            
+        # Apply theme
+        self.apply_theme(self.config['theme'])
+
+	def import_from_csv(self):
+		"""Import character data from CSV with detailed error reporting."""
+		# Select input file
+		file_path = filedialog.askopenfilename(
+			defaultextension=".csv",
+			filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")]
+		)
+		
+		if not file_path:
+			return
+		
+		# Ask if user wants to overwrite existing characters
+		overwrite = messagebox.askyesno(
+			"Import Options", 
+			"Do you want to overwrite existing characters with the same Sample Number?",
+			icon=messagebox.QUESTION
+		)
+		
+		self.status_text.set("Importing from CSV...")
+		self.root.update_idletasks()
+		
+		# Import data with overwrite option
+		try:
+			success_count, error_count, error_details = self.data_manager.import_from_csv(file_path, overwrite)
+			
+			if success_count > 0:
+				# Refresh data and UI
+				self.characters = self.data_manager.characters
+				self.update_steam_dropdown()
+				
+				if hasattr(self, 'stats_frame'):
+					self.update_statistics()
+					
+				self.status_text.set(f"Imported {success_count} characters from CSV (with {error_count} errors)")
+				
+				if error_count > 0:
+					# Show error details
+					error_window = tk.Toplevel(self.root)
+					error_window.title("Import Results")
+					error_window.geometry("600x400")
+					error_window.configure(bg=self.root.cget("bg"))
+					
+					# Create scrollable text area
+					import_frame = tk.Frame(error_window, bg=self.root.cget("bg"))
+					import_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+					
+					results_text = f"Successfully imported {success_count} characters!\n\n"
+					if error_count > 0:
+						results_text += f"Encountered {error_count} errors:\n\n"
+						for detail in error_details:
+							results_text += f"• {detail}\n"
+					
+					text_widget = tk.Text(
+						import_frame,
+						wrap=tk.WORD,
+						bg=self.root.cget("bg"),
+						fg="white",
+						height=20,
+						width=70
+					)
+					text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+					scrollbar = tk.Scrollbar(import_frame, command=text_widget.yview)
+					scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+					text_widget.config(yscrollcommand=scrollbar.set)
+					
+					text_widget.insert(tk.END, results_text)
+					text_widget.config(state=tk.DISABLED)
+					
+					# Add close button
+					tk.Button(
+						error_window,
+						text="Close",
+						command=error_window.destroy
+					).pack(pady=10)
+				else:
+					messagebox.showinfo("Import Complete", f"Successfully imported {success_count} characters!")
+			else:
+				self.status_text.set("Failed to import from CSV")
+				
+				# Create error message
+				error_message = "Failed to import characters from CSV.\n\nDetails:\n"
+				for detail in error_details:
+					error_message += f"• {detail}\n"
+				
+				messagebox.showerror("Import Failed", error_message)
+				
+		except Exception as e:
+			self.status_text.set("Failed to import from CSV")
+			messagebox.showerror("Import Failed", f"An unexpected error occurred: {e}")
+
+	def export_csv_template(self):
+		"""Export a CSV template for importing character data."""
+		# Select output file
+		file_path = filedialog.asksaveasfilename(
+			defaultextension=".csv",
+			filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
+			initialfile="character_template.csv"
+		)
+		
+		if not file_path:
+			return
+			
+		# Create template
+		if self.data_manager.create_csv_template(file_path):
+			self.status_text.set(f"Template exported to {file_path}")
+			messagebox.showinfo("Template Exported", 
+							   f"CSV template has been exported to:\n{file_path}\n\n"
+							   f"You can fill this template and import it later.")
+		else:
+			self.status_text.set("Failed to export template")
+			messagebox.showerror("Export Failed", "Failed to export CSV template.")
+        
+    def add_menu_bar(self):
+        """Add a menu bar to the application."""
+        menubar = tk.Menu(self.root)
+        
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Import Implant", command=self.open_image)
+		file_menu.add_command(label="Import from CSV", command=self.import_from_csv)
+        file_menu.add_command(label="Export CSV Template", command=self.export_csv_template)
+        file_menu.add_command(label="Export to CSV", command=self.export_to_csv)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.quit)
+        menubar.add_cascade(label="File", menu=file_menu)
+        
+        # Edit menu
+        edit_menu = tk.Menu(menubar, tearoff=0)
+        edit_menu.add_command(label="Delete Character", command=self.delete_character)
+        edit_menu.add_command(label="Change Background", command=self.change_background)
+        menubar.add_cascade(label="Edit", menu=edit_menu)
+        
+        # Steam accounts menu
+        steam_menu = tk.Menu(menubar, tearoff=0)
+        steam_menu.add_command(label="Add Steam Account", command=self.add_steam_account)
+        steam_menu.add_command(label="Refresh Steam Accounts", command=self.update_steam_dropdown)
+        menubar.add_cascade(label="Steam Accounts", menu=steam_menu)
+        
+        # Tools menu
+        tools_menu = tk.Menu(menubar, tearoff=0)
+        tools_menu.add_command(label="Scan All Implants", command=self.scan_and_update_implants)
+        tools_menu.add_command(label="Generate Statistics", command=self.update_statistics)
+        tools_menu.add_separator()
+        
+        # Theme submenu
+        theme_menu = tk.Menu(tools_menu, tearoff=0)
+        theme_menu.add_command(label="Dark Theme", command=lambda: self.apply_theme("dark"))
+        theme_menu.add_command(label="Light Theme", command=lambda: self.apply_theme("light"))
+        theme_menu.add_command(label="Blue Theme", command=lambda: self.apply_theme("blue"))
+        tools_menu.add_cascade(label="Themes", menu=theme_menu)
+        
+        menubar.add_cascade(label="Tools", menu=tools_menu)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Help", command=self.show_help)
+        help_menu.add_command(label="About", command=self.show_about)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        
+        self.root.config(menu=menubar)
+        
+    def add_status_bar(self):
+        """Add a status bar to the application."""
+        self.status_bar = tk.Frame(self.root, bg="#333333")
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        self.status_text = tk.StringVar()
+        self.status_text.set("Ready")
+        
+        status_label = tk.Label(
+            self.status_bar, 
+            textvariable=self.status_text, 
+            fg="white", 
+            bg="#333333",
+            anchor="w",
+            padx=10,
+            pady=2
+        )
+        status_label.pack(side=tk.LEFT)
+        
+        # Steam account indicator
+        self.steam_indicator = tk.StringVar()
+        self.steam_indicator.set("No Steam account selected")
+        
+        steam_label = tk.Label(
+            self.status_bar, 
+            textvariable=self.steam_indicator, 
+            fg="lightblue", 
+            bg="#333333",
+            anchor="e",
+            padx=10,
+            pady=2
+        )
+        steam_label.pack(side=tk.RIGHT)
+        
+        # Update steam indicator when selection changes
+        def update_steam_indicator(*args):
+            steam_id = self.selected_steam.get()
+            if steam_id:
+                char_count = len(self.characters.get(steam_id, []))
+                self.steam_indicator.set(f"Steam: {steam_id} ({char_count} characters)")
+            else:
+                self.steam_indicator.set("No Steam account selected")
+                
+        self.selected_steam.trace_add("write", update_steam_indicator)
+        
+    def add_statistics_panel(self):
+        """Add a statistics panel to the application."""
+        self.stats_frame = tk.LabelFrame(
+            self.root, 
+            text="Character Statistics", 
+            fg="white", 
+            bg="#222222",
+            padx=10,
+            pady=10
+        )
+        self.stats_frame.pack(fill=tk.X, padx=10, pady=5, before=self.button_frame)
+        
+        # Stats variables
+        self.total_chars = tk.StringVar(value="Total Characters: 0")
+        self.alpha_kills = tk.StringVar(value="Alpha Boss Kills: 0")
+        self.max_level = tk.StringVar(value="Max Level Bonus: 0")
+        
+        # Stats labels
+        tk.Label(
+            self.stats_frame, 
+            textvariable=self.total_chars, 
+            fg="white", 
+            bg="#222222"
+        ).pack(side=tk.LEFT, padx=10)
+        
+        tk.Label(
+            self.stats_frame, 
+            textvariable=self.alpha_kills, 
+            fg="orange", 
+            bg="#222222"
+        ).pack(side=tk.LEFT, padx=10)
+        
+        tk.Label(
+            self.stats_frame, 
+            textvariable=self.max_level, 
+            fg="lightgreen", 
+            bg="#222222"
+        ).pack(side=tk.LEFT, padx=10)
+        
+        # Update stats initially
+        self.update_statistics()
+        
+    def update_statistics(self):
+        """Update character statistics."""
+        if not hasattr(self, 'stats_frame'):
+            return
+            
+        total_chars = 0
+        alpha_kills = 0
+        max_level_bonus = 0
+        
+        for steam_id, chars in self.characters.items():
+            total_chars += len(chars)
+            
+            for char in chars:
+                # Count alpha boss kills
+                for kill in char.get("survival_quotient", []):
+                    if "Alpha" in kill:
+                        alpha_kills += 1
+                        
+                        # Extract max level bonus if available
+                        if "(+" in kill and "Survivor Max Level)" in kill:
+                            try:
+                                bonus = int(kill.split("+")[1].split(" ")[0])
+                                max_level_bonus = max(max_level_bonus, bonus)
+                            except (ValueError, IndexError):
+                                pass
+                                
+                # Check explorer notes bonuses
+                for note in char.get("explorer_notes", []):
+                    if "Max Levels" in note or "Max Level" in note:
+                        try:
+                            if "+" in note:
+                                bonus = int(note.split("+")[1].split(" ")[0])
+                                max_level_bonus = max(max_level_bonus, bonus)
+                        except (ValueError, IndexError):
+                            pass
+                            
+        # Update statistics variables
+        self.total_chars.set(f"Total Characters: {total_chars}")
+        self.alpha_kills.set(f"Alpha Boss Kills: {alpha_kills}")
+        self.max_level.set(f"Max Level Bonus: +{max_level_bonus}")
+        
+    def apply_theme(self, theme_name):
+        """Apply a theme to the application.
+        
+        Args:
+            theme_name (str): Theme name ('dark', 'light', or 'blue')
+        """
+        if theme_name == "dark":
+            colors = {
+                "bg": "black",
+                "fg": "white",
+                "accent": "#444444",
+                "highlight": "#555555",
+                "button": "#333333",
+                "listbox_bg": "#333333",
+                "listbox_fg": "white",
+                "frame_bg": "#222222"
+            }
+        elif theme_name == "light":
+            colors = {
+                "bg": "#f0f0f0",
+                "fg": "black",
+                "accent": "#e0e0e0",
+                "highlight": "#d0d0d0",
+                "button": "#e8e8e8",
+                "listbox_bg": "white",
+                "listbox_fg": "black",
+                "frame_bg": "#f5f5f5"
+            }
+        elif theme_name == "blue":
+            colors = {
+                "bg": "#1e3d59",
+                "fg": "white",
+                "accent": "#2b5d87",
+                "highlight": "#3a7ca5",
+                "button": "#2b5d87",
+                "listbox_bg": "#2b5d87",
+                "listbox_fg": "white",
+                "frame_bg": "#1e3d59"
+            }
+        else:
+            return
+            
+        # Update root
+        self.root.configure(bg=colors["bg"])
+        
+        # Update frames
+        for frame in [self.control_frame, self.display_frame, self.list_frame, self.button_frame]:
+            frame.configure(bg=colors["bg"])
+            
+        # Update labels
+        for widget in self.root.winfo_children():
+            if isinstance(widget, tk.Label):
+                widget.configure(bg=colors["bg"], fg=colors["fg"])
+                
+        # Update buttons
+        for widget in self.button_frame.winfo_children():
+            if isinstance(widget, tk.Button):
+                widget.configure(bg=colors["button"], fg=colors["fg"])
+                
+        # Update listbox
+        self.char_listbox.configure(
+            bg=colors["listbox_bg"], 
+            fg=colors["listbox_fg"],
+            selectbackground=colors["highlight"]
+        )
+        
+        # Update status bar if it exists
+        if hasattr(self, 'status_bar'):
+            self.status_bar.configure(bg=colors["accent"])
+            
+            for widget in self.status_bar.winfo_children():
+                if isinstance(widget, tk.Label):
+                    widget.configure(bg=colors["accent"])
+                    
+        # Update statistics frame if it exists
+        if hasattr(self, 'stats_frame'):
+            self.stats_frame.configure(bg=colors["frame_bg"])
+            
+            for widget in self.stats_frame.winfo_children():
+                if isinstance(widget, tk.Label):
+                    widget.configure(bg=colors["frame_bg"])
+                    
+        # Store theme
+        self.config['theme'] = theme_name
+        self.status_text.set(f"Theme changed to {theme_name}")
+        
+    def show_help(self):
+        """Show help information."""
+        help_text = """
+        ARK Character Implant Manager Help
+        
+        This tool helps you manage your ARK: Survival Evolved character implants.
+        
+        Main Features:
+        - Import character implant images and extract data using OCR
+        - Organize characters by Steam account
+        - View detailed character information
+        - Track boss kills, chibi levels, and explorer notes
+        - Export character data to CSV
+        
+        Getting Started:
+        1. Add a Steam account using the 'Add Steam Account' button
+        2. Select a Steam account from the dropdown
+        3. Use 'Select Implant Image' to import a character implant screenshot
+        
+        Tips:
+        - Take clear screenshots of your character implants for best OCR results
+        - Use the comments section to add notes about your characters
+        - Export to CSV for backup or analysis in spreadsheet software
+        
+        For more information, visit the GitHub repository.
+        """
+        
+        help_window = tk.Toplevel(self.root)
+        help_window.title("Help")
+        help_window.geometry("600x500")
+        help_window.configure(bg=self.root.cget("bg"))
+        
+        help_text_widget = tk.Text(
+            help_window, 
+            wrap=tk.WORD, 
+            bg=self.root.cget("bg"), 
+            fg="white",
+            padx=20,
+            pady=20
+        )
+        help_text_widget.pack(fill=tk.BOTH, expand=True)
+        help_text_widget.insert(tk.END, help_text)
+        help_text_widget.config(state=tk.DISABLED)
+        
+    def show_about(self):
+        """Show about information."""
+        about_text = """
+        ARK Character Implant Manager
+        
+        A module of ARK_AssistantV2
+        
+        This tool helps ARK: Survival Evolved players manage and track
+        their character implants, including boss kills, explorer notes,
+        and other character progression data.
+        
+        Features:
+        - OCR scanning of character implant screenshots
+        - Character data organization by Steam account
+        - Statistics and tracking of character progression
+        - Data export for analysis
+        
+        Visit the GitHub repository for updates and more information.
+        """
+        
+        messagebox.showinfo("About", about_text)
+        
+    def update_character_list(self, event=None):
+        """Override update_character_list to also update statistics."""
+        super().update_character_list(event)
+        
+        if hasattr(self, 'stats_frame'):
+            self.update_statistics()
+            
+    def scan_and_update_implants(self):
+        """Override scan_and_update_implants to update status."""
+        self.status_text.set("Scanning for implants...")
+        self.root.update_idletasks()
+        
+        count = self.data_manager.scan_and_import_all(self.ocr)
+        
+        if count > 0:
+            # Refresh data and UI
+            self.characters = self.data_manager.characters
+            self.update_steam_dropdown()
+            self.status_text.set(f"Imported {count} new character implants")
+            
+            if hasattr(self, 'stats_frame'):
+                self.update_statistics()
+                
+            messagebox.showinfo("Import Complete", f"Imported {count} new character implants.")
+        else:
+            self.status_text.set("No new implants found")
+
+# Entry point for standalone execution
+if __name__ == "__main__":
+    app = EnhancedCharacterImplantUI()
+    app.run()
